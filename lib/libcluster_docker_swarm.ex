@@ -5,7 +5,7 @@ defmodule Cluster.Strategy.DockerSwarm do
 
   alias Cluster.Strategy.State
 
-  plug(Tesla.Middleware.JSON)
+  plug Tesla.Middleware.JSON
 
   @default_polling_interval 5_000
 
@@ -105,16 +105,7 @@ defmodule Cluster.Strategy.DockerSwarm do
 
     get_docker_host()
     |> get_swarm_manager()
-    |> get_running_tasks(stack_name, service_name)
-    |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
-      %{"Addresses" => [address_cidr | _]} =
-        Enum.find(attachments, fn %{"Network" => %{"Spec" => %{Name: name}}} ->
-          name == network_name
-        end)
-
-      [address | _] = address_cidr |> String.split("/")
-      address
-    end)
+    |> get_running_task_addresses(stack_name, service_name, network_name)
     |> Enum.map(&String.to_atom("#{node_username}@#{&1}"))
   end
 
@@ -130,12 +121,22 @@ defmodule Cluster.Strategy.DockerSwarm do
     swarm_manager
   end
 
-  defp get_running_tasks(swarm_manager, stack_name, service_name) do
+  defp get_running_task_addresses(swarm_manager, stack_name, service_name, network_name) do
     get!("http://#{swarm_manager}:2375/tasks",
       query: [
         filters:
           "{\"service\":[\"#{stack_name}_#{service_name}\"],\"desired-state\":[\"running\"]}"
       ]
     )
+    |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
+      %{"Addresses" => [address_cidr | _]} =
+        Enum.find(attachments, fn %{"Network" => %{"Spec" => %{Name: name}}} ->
+          name == network_name
+        end)
+
+      [address | _] = address_cidr |> String.split("/")
+      address
+    end)
   end
+
 end
