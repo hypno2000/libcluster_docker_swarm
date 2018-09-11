@@ -23,6 +23,7 @@ defmodule Cluster.Strategy.DockerSwarm.MixProject do
     [
       {:libcluster, "~> 3.0"},
       {:inet_ext, "~> 0.4.0"},
+      {:tesla, "~> 1.1"},
     ]
   end
 end
