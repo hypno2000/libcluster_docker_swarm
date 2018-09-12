@@ -106,6 +106,7 @@ defmodule Cluster.Strategy.DockerSwarm do
 
     get_container_ids(swarm_manager, stack_name, service_name)
     |> Enum.map(&get_container_ip(swarm_manager, &1, network_name))
+    |> Enum.reject(&(&1 == nil))
     |> Enum.map(&String.to_atom("#{node_username}@#{&1}"))
     |> MapSet.new()
   end
@@ -139,10 +140,16 @@ defmodule Cluster.Strategy.DockerSwarm do
   end
 
   defp get_container_ip(swarm_manager, container_id, network_name) do
-    %Tesla.Env{
-      body: %{"NetworkSettings" => %{"Networks" => %{^network_name => %{"IPAddress" => ip}}}}
-    } = get!("http://#{swarm_manager}:2375/containers/#{container_id}/json")
+    get!("http://#{swarm_manager}:2375/containers/#{container_id}/json")
+    |> case do
+      %Tesla.Env{
+        body: %{"NetworkSettings" => %{"Networks" => %{^network_name => %{"IPAddress" => ip}}}}
+      } ->
+        ip
 
-    ip
+      %Tesla.Env{body: %{"message" => message}} ->
+        Logger.warn("Unable to get docker container IP: #{message}")
+        nil
+    end
   end
 end
