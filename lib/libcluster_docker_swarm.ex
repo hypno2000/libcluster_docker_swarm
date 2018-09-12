@@ -104,19 +104,17 @@ defmodule Cluster.Strategy.DockerSwarm do
 
     swarm_manager = get_docker_host() |> get_swarm_manager()
 
-    get_container_ids(swarm_manager, stack_name, service_name)
-    |> Enum.map(&get_container_ip(swarm_manager, &1, network_name))
-    |> Enum.reject(&(&1 == nil))
+    get_container_ips(swarm_manager, stack_name, service_name, network_name)
     |> Enum.map(&String.to_atom("#{node_username}@#{&1}"))
     |> MapSet.new()
   end
 
-  defp get_docker_host() do
+  def get_docker_host() do
     [{_, docker_host} | _] = :inet_ext.gateways()
     docker_host
   end
 
-  defp get_swarm_manager(docker_host) do
+  def get_swarm_manager(docker_host) do
     %Tesla.Env{body: %{"Swarm" => %{"RemoteManagers" => [%{"Addr" => ip_with_port} | _]}}} =
       get!("http://#{docker_host}:2375/info")
 
@@ -124,7 +122,7 @@ defmodule Cluster.Strategy.DockerSwarm do
     ip
   end
 
-  defp get_container_ids(swarm_manager, stack_name, service_name) do
+  def get_container_ips(swarm_manager, stack_name, service_name, network_name) do
     %Tesla.Env{body: body} =
       get!("http://#{swarm_manager}:2375/tasks",
         query: [
@@ -134,22 +132,15 @@ defmodule Cluster.Strategy.DockerSwarm do
       )
 
     body
-    |> Enum.map(fn %{"Status" => %{"ContainerStatus" => %{"ContainerID" => container_id}}} ->
-      container_id
+    |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
+      %{"Addresses" => [ip_with_port | _]} =
+        attachments
+        |> Enum.find(fn %{"Network" => %{"Spec" => %{"Name" => name}}} ->
+          name == network_name
+        end)
+
+      [ip | _] = String.split(ip_with_port, "/")
+      ip
     end)
-  end
-
-  defp get_container_ip(swarm_manager, container_id, network_name) do
-    get!("http://#{swarm_manager}:2375/containers/#{container_id}/json")
-    |> case do
-      %Tesla.Env{
-        body: %{"NetworkSettings" => %{"Networks" => %{^network_name => %{"IPAddress" => ip}}}}
-      } ->
-        ip
-
-      %Tesla.Env{body: %{"message" => message}} ->
-        Logger.warn("Unable to get docker container IP: #{message}")
-        nil
-    end
   end
 end
