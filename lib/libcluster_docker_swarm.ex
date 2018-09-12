@@ -3,6 +3,8 @@ defmodule Cluster.Strategy.DockerSwarm do
   use Cluster.Strategy
   use Tesla
 
+  require Logger
+
   alias Cluster.Strategy.State
 
   plug Tesla.Middleware.JSON
@@ -46,10 +48,12 @@ defmodule Cluster.Strategy.DockerSwarm do
       )
       |> case do
         :ok ->
+          Logger.info("Docker nodes disconnected", nodes: new_nodelist)
           new_nodelist
 
         {:error, bad_nodes} ->
           # Add back the nodes which should have been removed, but which couldn't be for some reason
+          Logger.error("Docker nodes could not be removed", nodes: bad_nodes)
           Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
             MapSet.put(acc, n)
           end)
@@ -64,10 +68,12 @@ defmodule Cluster.Strategy.DockerSwarm do
       )
       |> case do
         :ok ->
+          Logger.info("Docker nodes connected", nodes: new_nodelist)
           new_nodelist
 
         {:error, bad_nodes} ->
           # Remove the nodes which should have been added, but couldn't be for some reason
+          Logger.error("Docker nodes could not be added", nodes: bad_nodes)
           Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
             MapSet.delete(acc, n)
           end)
