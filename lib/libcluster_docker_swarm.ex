@@ -33,62 +33,53 @@ defmodule Cluster.Strategy.DockerSwarm do
           list_nodes: list_nodes
         } = state
       ) do
-    case get_nodes(state) do
-      {:ok, new_nodelist} ->
-        added = MapSet.difference(new_nodelist, state.meta)
-        removed = MapSet.difference(state.meta, new_nodelist)
+    new_nodelist = get_nodes(state)
+    added = MapSet.difference(new_nodelist, state.meta)
+    removed = MapSet.difference(state.meta, new_nodelist)
 
-        new_nodelist =
-          case Cluster.Strategy.disconnect_nodes(
-                 topology,
-                 disconnect,
-                 list_nodes,
-                 MapSet.to_list(removed)
-               ) do
-            :ok ->
-              new_nodelist
+    new_nodelist =
+      Cluster.Strategy.disconnect_nodes(
+        topology,
+        disconnect,
+        list_nodes,
+        MapSet.to_list(removed)
+      )
+      |> case do
+        :ok ->
+          new_nodelist
 
-            {:error, bad_nodes} ->
-              # Add back the nodes which should have been removed, but which couldn't be for some reason
-              Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
-                MapSet.put(acc, n)
-              end)
-          end
+        {:error, bad_nodes} ->
+          # Add back the nodes which should have been removed, but which couldn't be for some reason
+          Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
+            MapSet.put(acc, n)
+          end)
+      end
 
-        new_nodelist =
-          case Cluster.Strategy.connect_nodes(
-                 topology,
-                 connect,
-                 list_nodes,
-                 MapSet.to_list(added)
-               ) do
-            :ok ->
-              new_nodelist
+    new_nodelist =
+      Cluster.Strategy.connect_nodes(
+        topology,
+        connect,
+        list_nodes,
+        MapSet.to_list(added)
+      )
+      |> case do
+        :ok ->
+          new_nodelist
 
-            {:error, bad_nodes} ->
-              # Remove the nodes which should have been added, but couldn't be for some reason
-              Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
-                MapSet.delete(acc, n)
-              end)
-          end
+        {:error, bad_nodes} ->
+          # Remove the nodes which should have been added, but couldn't be for some reason
+          Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
+            MapSet.delete(acc, n)
+          end)
+      end
 
-        Process.send_after(
-          self(),
-          :load,
-          Keyword.get(state.config, :polling_interval, @default_polling_interval)
-        )
+    Process.send_after(
+      self(),
+      :load,
+      Keyword.get(state.config, :polling_interval, @default_polling_interval)
+    )
 
-        {:noreply, %{state | :meta => new_nodelist}}
-
-      _ ->
-        Process.send_after(
-          self(),
-          :load,
-          Keyword.get(state.config, :polling_interval, @default_polling_interval)
-        )
-
-        {:noreply, state}
-    end
+    {:noreply, %{state | :meta => new_nodelist}}
   end
 
   @impl true
@@ -107,6 +98,7 @@ defmodule Cluster.Strategy.DockerSwarm do
     |> get_swarm_manager()
     |> get_running_task_addresses(stack_name, service_name, network_name)
     |> Enum.map(&String.to_atom("#{node_username}@#{&1}"))
+    |> MapSet.new()
   end
 
   defp get_docker_host() do
@@ -133,12 +125,12 @@ defmodule Cluster.Strategy.DockerSwarm do
 
     body
     |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
-      %{"Addresses" => [address_cidr | _]} =
+      %{"Addresses" => [address_with_mask | _]} =
         Enum.find(attachments, fn %{"Network" => %{"Spec" => %{"Name" => name}}} ->
           name == network_name
         end)
 
-      [address | _] = address_cidr |> String.split("/")
+      [address | _] = address_with_mask |> String.split("/")
       address
     end)
   end
