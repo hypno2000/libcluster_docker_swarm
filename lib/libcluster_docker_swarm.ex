@@ -97,7 +97,7 @@ defmodule Cluster.Strategy.DockerSwarm do
   end
 
   @spec get_nodes(State.t()) :: {:ok, [atom()]} | {:error, []}
-  defp get_nodes(%State{config: config}) do
+  def get_nodes(%State{config: config}) do
     stack_name = Keyword.fetch!(config, :stack_name)
     service_name = Keyword.fetch!(config, :service_name)
     network_name = Keyword.fetch!(config, :network_name)
@@ -115,22 +115,26 @@ defmodule Cluster.Strategy.DockerSwarm do
   end
 
   defp get_swarm_manager(docker_host) do
-    %{"Swarm" => %{"RemoteManagers" => [%{"Addr" => swarm_manager} | _]}} =
+    %Tesla.Env{body: %{"Swarm" => %{"RemoteManagers" => [%{"Addr" => ip_with_port} | _]}}} =
       get!("http://#{docker_host}:2375/info")
 
-    swarm_manager
+    [ip | _] = ip_with_port |> String.split(":")
+    ip
   end
 
   defp get_running_task_addresses(swarm_manager, stack_name, service_name, network_name) do
-    get!("http://#{swarm_manager}:2375/tasks",
-      query: [
-        filters:
-          "{\"service\":[\"#{stack_name}_#{service_name}\"],\"desired-state\":[\"running\"]}"
-      ]
-    )
+    %Tesla.Env{body: body} =
+      get!("http://#{swarm_manager}:2375/tasks",
+        query: [
+          filters:
+            "{\"service\":[\"#{stack_name}_#{service_name}\"],\"desired-state\":[\"running\"]}"
+        ]
+      )
+
+    body
     |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
       %{"Addresses" => [address_cidr | _]} =
-        Enum.find(attachments, fn %{"Network" => %{"Spec" => %{Name: name}}} ->
+        Enum.find(attachments, fn %{"Network" => %{"Spec" => %{"Name" => name}}} ->
           name == network_name
         end)
 
@@ -138,5 +142,4 @@ defmodule Cluster.Strategy.DockerSwarm do
       address
     end)
   end
-
 end
