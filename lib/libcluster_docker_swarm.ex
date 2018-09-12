@@ -54,6 +54,7 @@ defmodule Cluster.Strategy.DockerSwarm do
         {:error, bad_nodes} ->
           # Add back the nodes which should have been removed, but which couldn't be for some reason
           Logger.error("Docker nodes could not be removed", nodes: bad_nodes)
+
           Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
             MapSet.put(acc, n)
           end)
@@ -74,6 +75,7 @@ defmodule Cluster.Strategy.DockerSwarm do
         {:error, bad_nodes} ->
           # Remove the nodes which should have been added, but couldn't be for some reason
           Logger.error("Docker nodes could not be added", nodes: bad_nodes)
+
           Enum.reduce(bad_nodes, new_nodelist, fn {n, _}, acc ->
             MapSet.delete(acc, n)
           end)
@@ -100,9 +102,10 @@ defmodule Cluster.Strategy.DockerSwarm do
     network_name = Keyword.fetch!(config, :network_name)
     node_username = Keyword.fetch!(config, :node_username)
 
-    get_docker_host()
-    |> get_swarm_manager()
-    |> get_running_task_addresses(stack_name, service_name, network_name)
+    swarm_manager = get_docker_host() |> get_swarm_manager()
+
+    get_container_ids(swarm_manager, stack_name, service_name)
+    |> Enum.map(&get_container_ip(swarm_manager, &1, network_name))
     |> Enum.map(&String.to_atom("#{node_username}@#{&1}"))
     |> MapSet.new()
   end
@@ -120,7 +123,7 @@ defmodule Cluster.Strategy.DockerSwarm do
     ip
   end
 
-  defp get_running_task_addresses(swarm_manager, stack_name, service_name, network_name) do
+  defp get_container_ids(swarm_manager, stack_name, service_name) do
     %Tesla.Env{body: body} =
       get!("http://#{swarm_manager}:2375/tasks",
         query: [
@@ -130,14 +133,16 @@ defmodule Cluster.Strategy.DockerSwarm do
       )
 
     body
-    |> Enum.map(fn %{"NetworksAttachments" => attachments} ->
-      %{"Addresses" => [address_with_mask | _]} =
-        Enum.find(attachments, fn %{"Network" => %{"Spec" => %{"Name" => name}}} ->
-          name == network_name
-        end)
-
-      [address | _] = address_with_mask |> String.split("/")
-      address
+    |> Enum.map(fn %{"Status" => %{"ContainerStatus" => %{"ContainerID" => container_id}}} ->
+      container_id
     end)
+  end
+
+  defp get_container_ip(swarm_manager, container_id, network_name) do
+    %Tesla.Env{
+      body: %{"NetworkSettings" => %{"Networks" => %{^network_name => %{"IPAddress" => ip}}}}
+    } = get!("http://#{swarm_manager}:2375/containers/#{container_id}/json")
+
+    ip
   end
 end
