@@ -93,7 +93,7 @@ defmodule Cluster.Strategy.DockerSwarm do
     {:noreply, state}
   end
 
-  @spec get_nodes(State.t()) :: {:ok, [atom()]} | {:error, []}
+  @spec get_nodes(State.t()) :: MapSet.t(atom())
   def get_nodes(%State{config: config}) do
     stack_name = Keyword.fetch!(config, :stack_name)
     service_name = Keyword.fetch!(config, :service_name)
